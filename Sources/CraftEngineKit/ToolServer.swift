@@ -4,8 +4,15 @@ import os
 /// A tool the host answers itself, under the engine's own tool id.
 public protocol NativeTool: Sendable {
     var name: String { get }
-    /// The `tools/call` result: `content`, and `structuredContent` / `isError` as the engine sends them.
-    func call(_ arguments: JSONValue) async -> JSONValue
+    /// One line for `tools/list`.
+    var description: String { get }
+    /// The `tools/call` result: `content`, and `structuredContent` / `isError` as the engine sends
+    /// them. `meta` is the request's `_meta` (the engine sends `clean_room` with a replaced tool).
+    func call(_ arguments: JSONValue, meta: JSONValue) async -> JSONValue
+}
+
+extension NativeTool {
+    public var description: String { "" }
 }
 
 /// An MCP server on stdio that stands in front of the pinned engine (`craft-anything-cli mcp …`).
@@ -87,7 +94,7 @@ public final class ToolServer: Sendable {
             log("call \(name) (native)")
             let key = id.compact()
             let task = Task {
-                let result = await tool.call(msg["params"]?["arguments"] ?? [:])
+                let result = await tool.call(msg["params"]?["arguments"] ?? [:], meta: msg["params"]?["_meta"] ?? .null)
                 // A cancelled request gets no reply.
                 guard running.withLock({ $0.removeValue(forKey: key) }) != nil, !Task.isCancelled else { return }
                 await out.write(JSONValue.object(["jsonrpc": "2.0", "id": id, "result": result]).compact())

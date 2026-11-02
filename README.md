@@ -10,6 +10,7 @@ drives it the same way any MCP client would. No engine code is ported yet.
 Tools/engine/pin-engine.sh     # build the pinned engine into Engine/bin (needs the ../craft-anything clone at the pin)
 swift build
 .build/debug/CraftAnythingNative
+Tools/make-app.sh              # or: a development app bundle with all three programs, at .build/CraftAnythingNative.app
 ```
 
 `swift test` runs the engine-connection tests. When `Engine/bin` holds an engine, the tests also start it, list
@@ -31,8 +32,33 @@ That draws the window into a PNG and quits. The engine's settings, projects and 
   - `EngineTool` and `ToolParameter` read the tools' JSON schemas, and `ToolResult` reads the engine's
     `{"result"}` / `{"error"}` replies.
   - `ToolServer` stands in front of the engine for the builders it starts. Every message passes through
-    unchanged, except calls to a `NativeTool`, which are answered in Swift under the engine's own tool id. This
-    is where stage 2's ports plug in.
+    unchanged, except calls to a `NativeTool`, which are answered in Swift under the engine's own tool id.
+  - `MCPServer` serves `NativeTool`s on their own, as an engine plugin.
+- **`CraftWebKit`** is the engine's website browser set served with WebKit: `web_site_open`,
+  `web_site_capture`, `web_page_states_capture` and `web_site_close`, under the engine's ids and arguments.
+  They run the engine's own page scripts (`PageScripts.swift`, generated from the pin by
+  `Tools/engine/sync-scripts.sh`) and write the same files: `screenshot-<width>.png`, `noise-<width>.png`,
+  `capture.json`, `README.md`, `page.html`, `states.json` and `state-<n>.png`. Clean room comes from the call's
+  `_meta`, as the engine sends it. The page runs in a private (non-persistent) WKWebView with light appearance and
+  classic scrollbars, in a window nobody sees, at one pixel per CSS pixel. WebKit's window-occlusion check is
+  turned off, so the page believes it's on screen (that switch isn't public API; without it the window is on
+  screen but fully transparent, and the page is flagged if it still thinks it's hidden). Load errors are read
+  from inside the page, so a failed request shows only when the browser reports it there.
+- **`craft-anything-native-tools`** is the plugin the engine sends those tools to. In the engine's
+  `config.toml` (`craft-anything-native-tools --print-config` prints the entry with its own path):
+
+  ```toml
+  [[plugins.mcp]]
+  id = "mac_app"
+  command = "/…/CraftAnythingNative.app/Contents/MacOS/craft-anything-native-tools"
+  replaces = ["web_site_open", "web_site_capture", "web_page_states_capture", "web_site_close"]
+  ```
+
+  Every engine process reads it, so Study, the checks and the builders all picture websites with WebKit. The app
+  doesn't write it for you yet: a project studied with Chromium must be checked with Chromium, so the choice
+  belongs to each project (stage 2's next step). Each call is logged to
+  `~/Library/Logs/CraftAnythingNative/native-tools.log`. `Tools/parity/webkit-parity.py` captures the same pages
+  both ways and reports the differences.
 - **`craft-anything-tool-server`** is the program builders get as their tool server. The app sets
   `CRAFT_ANYTHING_TOOL_SERVER` (a patch in our fork) and `CRAFT_ANYTHING_ENGINE` in the engine's environment.
   `mcp …` is served through `ToolServer`; anything else (`builder-notes`) runs the engine itself. Each call is
@@ -48,8 +74,9 @@ That draws the window into a PNG and quits. The engine's settings, projects and 
 ## The engine pin
 
 `Tools/engine/pin.env` names the engine commit this shell drives: the `native` branch of our fork (kept
-private, at `xocialize/craft-anything`), based on upstream `8c3532d`. It adds the SwiftUI stack and the
-`CRAFT_ANYTHING_TOOL_SERVER` setting. We don't send changes upstream. Instead, we review what upstream adds
+private, at `xocialize/craft-anything`), based on upstream `8c3532d`. It adds the SwiftUI stack, the
+`CRAFT_ANYTHING_TOOL_SERVER` setting, plugins that `replace` built-in tools (with the call's `_meta`), and the
+website page scripts as files. We don't send changes upstream. Instead, we review what upstream adds
 since the base and cherry-pick what's worth having. After that, move the pin, run `pin-engine.sh` and run the
 tests again. `Engine/bin/pin.txt` records the binary's commit, version and sha256, and the toolbar shows that
 commit.
@@ -57,12 +84,14 @@ commit.
 ## License
 
 This shell is MIT (see `LICENSE`). The engine it drives is storytold/craft-anything, MIT OR Apache-2.0. This
-shell uses none of its brand assets.
+shell uses none of its brand assets. `Sources/CraftWebKit/PageScripts.swift` holds a copy of the engine's
+website page scripts, under the engine's license, as its header says.
 
 ## Next (stage 2)
 
-Port the pieces that are better native, behind the same tool ids, as `NativeTool`s in the tool server:
-- website capture and checks (WKWebView)
+Port the pieces that are better native, behind the same tool ids, as `NativeTool`s the engine sends to
+`craft-anything-native-tools`:
+- website capture (WKWebView): done; next, each project records the browser that studied it
 - window capture (ScreenCaptureKit)
 - driving Claude Code, and the inbox
 - project files, checked byte for byte against the pinned engine

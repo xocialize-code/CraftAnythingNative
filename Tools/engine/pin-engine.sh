@@ -23,6 +23,7 @@ fi
 if ! command -v cargo >/dev/null 2>&1 && [ -x /opt/homebrew/opt/rustup/bin/cargo ]; then
     PATH=/opt/homebrew/opt/rustup/bin:$PATH
 fi
+"$here/sync-scripts.sh" "$clone"
 (cd "$clone" && CARGO_INCREMENTAL=0 cargo build --release --locked -p craft-anything-cli)
 
 # The CLI finds itself by name to start a builder's tools: keep its name, in a folder of its own.

@@ -222,7 +222,7 @@ private func firstEvent(_ client: MCPClient, within seconds: Double, where match
 /// A native tool for the tests: echoes its arguments, or waits forever when told to.
 private struct EchoTool: NativeTool {
     let name = "native_echo"
-    func call(_ arguments: JSONValue) async -> JSONValue {
+    func call(_ arguments: JSONValue, meta: JSONValue) async -> JSONValue {
         if arguments["wait"]?.bool == true { try? await Task.sleep(for: .seconds(3600)) }
         return ["content": [["type": "text", "text": "native"]], "structuredContent": ["result": arguments]]
     }
