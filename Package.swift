@@ -7,12 +7,16 @@ let package = Package(
     products: [
         .library(name: "CraftEngineKit", targets: ["CraftEngineKit"]),
         .executable(name: "CraftAnythingNative", targets: ["CraftAnythingNative"]),
+        .executable(name: "craft-anything-tool-server", targets: ["CraftAnythingToolServer"]),
     ],
     targets: [
-        // The engine connection: the pinned craft-anything-cli's MCP server over stdio, and its inbox.
+        // The engine connection: the pinned craft-anything-cli's MCP server over stdio, its inbox,
+        // and the tool server that stands in front of it for builders.
         .target(name: "CraftEngineKit"),
         // The SwiftUI shell.
         .executableTarget(name: "CraftAnythingNative", dependencies: ["CraftEngineKit"]),
+        // What builders get as their tool server: the engine's, with native tools answering here.
+        .executableTarget(name: "CraftAnythingToolServer", dependencies: ["CraftEngineKit"]),
         .testTarget(name: "CraftEngineKitTests", dependencies: ["CraftEngineKit"]),
     ]
 )

@@ -76,12 +76,12 @@ private struct ToolRunner: View {
                 }
                 Text(tool.description).textSelection(.enabled)
                 if !tool.parameters.isEmpty {
-                    Form {
+                    VStack(alignment: .leading, spacing: 14) {
                         ForEach(tool.parameters) { p in field(p) }
                     }
-                    .formStyle(.grouped)
-                    .scrollDisabled(true)
-                    .frame(minHeight: CGFloat(tool.parameters.count) * 64 + 20)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                 }
                 HStack {
                     if let running {
@@ -128,9 +128,14 @@ private struct ToolRunner: View {
                 Text(p.description)
             }
         default:
-            TextField(text: binding(p.name), prompt: Text(prompt(p))) {
+            // Name and description above, the field below at full width: beside a long description
+            // the field was squeezed to a sliver.
+            VStack(alignment: .leading, spacing: 4) {
                 Text(label).font(.callout.monospaced())
-                Text(p.description)
+                if !p.description.isEmpty { Text(p.description).font(.caption).foregroundStyle(.secondary) }
+                TextField(label, text: binding(p.name), prompt: Text(prompt(p)))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
             }
         }
     }

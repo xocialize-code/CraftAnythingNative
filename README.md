@@ -30,6 +30,13 @@ That draws the window into a PNG and quits. The engine's settings, projects and 
     posts the request there and waits, and the app writes the answer back as a whole file.
   - `EngineTool` and `ToolParameter` read the tools' JSON schemas, and `ToolResult` reads the engine's
     `{"result"}` / `{"error"}` replies.
+  - `ToolServer` stands in front of the engine for the builders it starts. Every message passes through
+    unchanged, except calls to a `NativeTool`, which are answered in Swift under the engine's own tool id. This
+    is where stage 2's ports plug in.
+- **`craft-anything-tool-server`** is the program builders get as their tool server. The app sets
+  `CRAFT_ANYTHING_TOOL_SERVER` (a patch in our fork) and `CRAFT_ANYTHING_ENGINE` in the engine's environment.
+  `mcp …` is served through `ToolServer`; anything else (`builder-notes`) runs the engine itself. Each call is
+  logged to `~/Library/Logs/CraftAnythingNative/tool-server.log`.
 - **`CraftAnythingNative`** is the app:
   - New Build: the request, the original (none, a website, or an app or file), the stack, and the number of
     rounds.
@@ -40,8 +47,9 @@ That draws the window into a PNG and quits. The engine's settings, projects and 
 
 ## The engine pin
 
-`Tools/engine/pin.env` names the engine commit this shell drives: the `feature/swiftui-stack` branch of the
-local fork, based on upstream `8c3532d`. We don't send changes upstream. Instead, we review what upstream adds
+`Tools/engine/pin.env` names the engine commit this shell drives: the `native` branch of our fork (kept
+private, at `xocialize/craft-anything`), based on upstream `8c3532d`. It adds the SwiftUI stack and the
+`CRAFT_ANYTHING_TOOL_SERVER` setting. We don't send changes upstream. Instead, we review what upstream adds
 since the base and cherry-pick what's worth having. After that, move the pin, run `pin-engine.sh` and run the
 tests again. `Engine/bin/pin.txt` records the binary's commit, version and sha256, and the toolbar shows that
 commit.
@@ -53,7 +61,7 @@ shell uses none of its brand assets.
 
 ## Next (stage 2)
 
-Port the pieces that are better native, behind the same tool ids:
+Port the pieces that are better native, behind the same tool ids, as `NativeTool`s in the tool server:
 - website capture and checks (WKWebView)
 - window capture (ScreenCaptureKit)
 - driving Claude Code, and the inbox

@@ -24,6 +24,19 @@ public enum EngineLocator {
         return nil
     }
 
+    public static let toolServerName = "craft-anything-tool-server"
+
+    /// The tool server that stands in front of the engine for the agents it starts: inside the app
+    /// bundle, else beside this program (`swift build` puts both in `.build/<config>/`).
+    public static func findToolServer() -> URL? {
+        let fm = FileManager.default
+        if let bundled = Bundle.main.url(forAuxiliaryExecutable: toolServerName), fm.isExecutableFile(atPath: bundled.path) {
+            return bundled
+        }
+        let beside = Bundle.main.executableURL?.resolvingSymlinksInPath().deletingLastPathComponent().appendingPathComponent(toolServerName)
+        return beside.flatMap { fm.isExecutableFile(atPath: $0.path) ? $0 : nil }
+    }
+
     /// What `Tools/engine/pin-engine.sh` recorded beside the engine (`commit`, `version`, `sha256`).
     public static func pin(of engine: URL) -> [String: String] {
         let file = engine.deletingLastPathComponent().appendingPathComponent("pin.txt")
@@ -41,8 +54,16 @@ public enum EngineLocator {
     /// folders on PATH, since an app opened from the Dock gets the system's short PATH. Homebrew's
     /// rustup is keg-only: its `cargo` is in `opt/rustup/bin`, not `bin`, so builds of Rust stacks
     /// found no cargo.
-    public static func environment(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    ///
+    /// With a `toolServer`, the agents the engine starts get it as their tool server
+    /// (`CRAFT_ANYTHING_TOOL_SERVER`, a patch in our fork), and it finds `engine` through
+    /// `CRAFT_ANYTHING_ENGINE`.
+    public static func environment(
+        base: [String: String] = ProcessInfo.processInfo.environment, engine: URL? = nil, toolServer: URL? = nil
+    ) -> [String: String] {
         var env = base.filter { key, _ in key != "CLAUDECODE" && !key.hasPrefix("CLAUDE_CODE_") }
+        if let engine { env["CRAFT_ANYTHING_ENGINE"] = engine.path }
+        if let toolServer { env["CRAFT_ANYTHING_TOOL_SERVER"] = toolServer.path }
         let home = env["HOME"] ?? NSHomeDirectory()
         let extra = [
             "\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "\(home)/.cargo/bin",

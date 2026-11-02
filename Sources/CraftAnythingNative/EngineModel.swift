@@ -76,7 +76,8 @@ final class EngineModel {
         }
         enginePath = engine.path
         pin = EngineLocator.pin(of: engine)
-        var env = EngineLocator.environment()
+        // Builders the engine starts reach it through our tool server, where native tools answer.
+        var env = EngineLocator.environment(engine: engine, toolServer: EngineLocator.findToolServer())
         if let configDir { env["CRAFT_ANYTHING_CONFIG_DIR"] = configDir.path }
         let client = MCPClient(executable: engine, arguments: ["mcp", "--all-tools", "--inbox", inbox.directory.path], environment: env)
         do {

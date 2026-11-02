@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 
 @testable import CraftEngineKit
@@ -215,6 +216,50 @@ private func firstEvent(_ client: MCPClient, within seconds: Double, where match
     @Test func aMissingProgramIsAnError() async {
         let client = MCPClient(executable: URL(fileURLWithPath: "/nonexistent/craft-anything-cli"), arguments: ["mcp"])
         await #expect(throws: EngineError.self) { try await client.start() }
+    }
+}
+
+/// A native tool for the tests: echoes its arguments, or waits forever when told to.
+private struct EchoTool: NativeTool {
+    let name = "native_echo"
+    func call(_ arguments: JSONValue) async -> JSONValue {
+        if arguments["wait"]?.bool == true { try? await Task.sleep(for: .seconds(3600)) }
+        return ["content": [["type": "text", "text": "native"]], "structuredContent": ["result": arguments]]
+    }
+}
+
+@Suite struct ToolServerTests {
+    @Test func passesTheEngineThroughAndAnswersNativeToolsItself() async throws {
+        let script = try tempDir().appendingPathComponent("stand-in.sh")
+        try standIn.write(to: script, atomically: true, encoding: .utf8)
+        let calls = OSAllocatedUnfairLock(initialState: [String]())
+        let server = ToolServer(
+            engine: URL(fileURLWithPath: "/bin/sh"), arguments: [script.path], environment: [:], native: [EchoTool()],
+            log: { line in calls.withLock { $0.append(line) } })
+        let input = Pipe(), output = Pipe()
+        let run = Task { try await server.run(input: input.fileHandleForReading, output: output.fileHandleForWriting) }
+        var replies = LineSplitter.stream(from: output.fileHandleForReading).makeAsyncIterator()
+        func send(_ m: JSONValue) throws { try input.fileHandleForWriting.write(contentsOf: Data((m.compact() + "\n").utf8)) }
+
+        try send(["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": [:]])
+        #expect(JSONValue.parse(await replies.next() ?? "")?["result"]?["serverInfo"]?["name"]?.string == "stand-in")
+        // The engine's own tool goes through; the native one is answered here.
+        try send(["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "core_session_show", "arguments": [:]]])
+        #expect(JSONValue.parse(await replies.next() ?? "")?["result"]?["echo"]?.bool == true)
+        try send(["jsonrpc": "2.0", "id": "three", "method": "tools/call", "params": ["name": "native_echo", "arguments": ["x": 1]]])
+        let native = JSONValue.parse(await replies.next() ?? "")
+        #expect(native?["id"]?.string == "three")
+        #expect(native?["result"]?["structuredContent"]?["result"]?["x"]?.int == 1)
+        // A cancelled native call gets no reply, and what follows still works.
+        try send(["jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": ["name": "native_echo", "arguments": ["wait": true]]])
+        try send(["jsonrpc": "2.0", "method": "notifications/cancelled", "params": ["requestId": 4]])
+        try send(["jsonrpc": "2.0", "id": 5, "method": "ping"])
+        #expect(JSONValue.parse(await replies.next() ?? "")?["id"]?.int == 5)
+        // Closing the input lets the engine finish and the server return its status.
+        try input.fileHandleForWriting.close()
+        #expect(try await run.value == 0)
+        #expect(calls.withLock { $0 }.contains("call core_session_show"))
+        #expect(calls.withLock { $0 }.contains("call native_echo (native)"))
     }
 }
 
