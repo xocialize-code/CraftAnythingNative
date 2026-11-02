@@ -26,9 +26,9 @@ private func tempDir() throws -> URL {
     return d
 }
 
-private func standInClient() throws -> MCPClient {
+private func standInClient(_ source: String = standIn) throws -> MCPClient {
     let script = try tempDir().appendingPathComponent("stand-in.sh")
-    try standIn.write(to: script, atomically: true, encoding: .utf8)
+    try source.write(to: script, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
     return MCPClient(executable: URL(fileURLWithPath: "/bin/sh"), arguments: [script.path])
 }
@@ -170,6 +170,34 @@ private func firstEvent(_ client: MCPClient, within seconds: Double, where match
         await client.stop()
     }
 
+    @Test func cancellingTheCallerCancelsTheRequest() async throws {
+        let client = try standInClient()
+        try await client.start()
+        let start = ContinuousClock.now
+        let call = Task { try await client.request("slow", [:], timeout: .seconds(60)) }
+        try await Task.sleep(for: .milliseconds(200))
+        call.cancel()
+        await #expect(throws: CancellationError.self) { try await call.value }
+        #expect(ContinuousClock.now - start < .seconds(3))
+        #expect(try await client.request("ping", [:], timeout: .seconds(5))["echo"]?.bool == true)
+        await client.stop()
+    }
+
+    /// Busy engines ignore stdin closing: one leaves on a second SIGTERM, as the CLI does (its first
+    /// is taken as Ctrl-C), and one ignores SIGTERM altogether.
+    @Test(arguments: [
+        "trap 'if [ -n \"$t\" ]; then exit 130; fi; t=1' TERM",
+        "trap '' TERM",
+    ])
+    func stopEndsABusyEngine(trap: String) async throws {
+        let client = try standInClient("#!/bin/sh\n\(trap)\nwhile :; do sleep 0.1; done\n")
+        try await client.start()
+        let start = ContinuousClock.now
+        await client.stop(grace: .milliseconds(200))
+        #expect(await !client.isRunning)
+        #expect(ContinuousClock.now - start < .seconds(3))
+    }
+
     @Test func anEngineThatStopsFailsWhatWaitsAndSaysWhy() async throws {
         let client = try standInClient()
         try await client.start()
@@ -187,6 +215,22 @@ private func firstEvent(_ client: MCPClient, within seconds: Double, where match
     @Test func aMissingProgramIsAnError() async {
         let client = MCPClient(executable: URL(fileURLWithPath: "/nonexistent/craft-anything-cli"), arguments: ["mcp"])
         await #expect(throws: EngineError.self) { try await client.start() }
+    }
+}
+
+@Suite struct EngineLocatorTests {
+    @Test func theEngineGetsAFullPathAndNoClaudeCodeMarks() {
+        let env = EngineLocator.environment(base: [
+            "HOME": "/Users/x", "PATH": "/usr/bin:/bin", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "LANG": "en_US.UTF-8",
+        ])
+        #expect(env["CLAUDECODE"] == nil && env["CLAUDE_CODE_ENTRYPOINT"] == nil)
+        #expect(env["LANG"] == "en_US.UTF-8")
+        let path = env["PATH"]?.split(separator: ":").map(String.init) ?? []
+        #expect(Array(path.prefix(2)) == ["/usr/bin", "/bin"], "the PATH it was given comes first")
+        for p in ["/Users/x/.local/bin", "/opt/homebrew/bin", "/Users/x/.cargo/bin", "/opt/homebrew/opt/rustup/bin"] {
+            #expect(path.contains(p), "\(p)")
+        }
+        #expect(Set(path).count == path.count)
     }
 }
 

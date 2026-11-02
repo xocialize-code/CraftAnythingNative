@@ -104,10 +104,15 @@ final class ProjectModel {
             lastError = s.errorMessage
         }
         if let r = st.result {
-            statusLabel = r["status_label"]?.string ?? ""
+            let label = r["status_label"]?.string ?? ""
             note = r["note"]?.string ?? ""
             running = r["running"]?.bool ?? false
             queued = r["queued"]?.int
+            // The sidebar lists every project's status from project_list; keep this one's current there.
+            if label != statusLabel {
+                statusLabel = label
+                await engine.refreshProjects()
+            }
         }
     }
 

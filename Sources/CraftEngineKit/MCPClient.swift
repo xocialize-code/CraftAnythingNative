@@ -120,38 +120,58 @@ public actor MCPClient {
         return (reply["contents"]?.array ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
     }
 
-    /// Send a request and wait for its reply's `result`. On a timeout the server is told to cancel.
+    /// Send a request and wait for its reply's `result`. On a timeout, or when the calling task is
+    /// cancelled, the server is told to cancel.
     public func request(_ method: String, _ params: JSONValue, timeout: Duration) async throws -> JSONValue {
         if let finished { throw finished }
+        try Task.checkCancellation()
         let id = nextID
         nextID += 1
         let message: JSONValue = ["jsonrpc": "2.0", "id": .number(Double(id)), "method": .string(method), "params": params]
-        return try await withCheckedThrowingContinuation { cont in
-            pending[id] = cont
-            do {
-                try send(message)
-            } catch {
-                pending[id] = nil
-                cont.resume(throwing: error)
-                return
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                pending[id] = cont
+                do {
+                    try send(message)
+                } catch {
+                    pending[id] = nil
+                    cont.resume(throwing: error)
+                    return
+                }
+                Task { [weak self] in
+                    try? await Task.sleep(for: timeout)
+                    await self?.expire(id, reason: "timeout", EngineError("The engine didn't answer \(method) in time."))
+                }
             }
-            Task { [weak self] in
-                try? await Task.sleep(for: timeout)
-                await self?.expire(id, method: method)
-            }
+        } onCancel: {
+            // Runs after the body has registered the request: it waits for the actor.
+            Task { await self.expire(id, reason: "cancelled", CancellationError()) }
         }
     }
 
-    /// Stop the engine: close its stdin (it finishes running calls and exits), then terminate it if
-    /// it is still there after `grace`.
+    /// Stop the engine: close its stdin (it finishes running calls and exits), then signal it if it
+    /// is still there after `grace`. The CLI takes a first SIGTERM as Ctrl-C, which only raises a
+    /// flag that a waiting call may not look at; a second one makes it leave. SIGKILL is last.
     public func stop(grace: Duration = .seconds(3)) async {
         try? input.fileHandleForWriting.close()
-        let deadline = ContinuousClock.now + grace
+        if await exited(within: grace) { return fail(EngineError("The engine was stopped.")) }
+        for _ in 0..<2 where process.isRunning {
+            process.terminate()
+            if await exited(within: .milliseconds(500)) { break }
+        }
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
+            _ = await exited(within: .seconds(1))
+        }
+        fail(EngineError("The engine was stopped."))
+    }
+
+    private func exited(within wait: Duration) async -> Bool {
+        let deadline = ContinuousClock.now + wait
         while process.isRunning, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(50))
         }
-        if process.isRunning { process.terminate() }
-        fail(EngineError("The engine was stopped."))
+        return !process.isRunning
     }
 
     public var isRunning: Bool { process.isRunning }
@@ -191,10 +211,10 @@ public actor MCPClient {
         }
     }
 
-    private func expire(_ id: Int, method: String) {
+    private func expire(_ id: Int, reason: String, _ error: any Error) {
         guard let cont = pending.removeValue(forKey: id) else { return }
-        try? send(["jsonrpc": "2.0", "method": "notifications/cancelled", "params": ["requestId": .number(Double(id)), "reason": "timeout"]])
-        cont.resume(throwing: EngineError("The engine didn't answer \(method) in time."))
+        try? send(["jsonrpc": "2.0", "method": "notifications/cancelled", "params": ["requestId": .number(Double(id)), "reason": .string(reason)]])
+        cont.resume(throwing: error)
     }
 
     private func endOfOutput() {

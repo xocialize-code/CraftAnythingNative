@@ -46,7 +46,10 @@ since the base and cherry-pick what's worth having. After that, move the pin, ru
 tests again. `Engine/bin/pin.txt` records the binary's commit, version and sha256, and the toolbar shows that
 commit.
 
-The engine is storytold/craft-anything, MIT OR Apache-2.0. This shell uses none of its brand assets.
+## License
+
+This shell is MIT (see `LICENSE`). The engine it drives is storytold/craft-anything, MIT OR Apache-2.0. This
+shell uses none of its brand assets.
 
 ## Next (stage 2)
 

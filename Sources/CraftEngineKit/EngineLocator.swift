@@ -38,11 +38,16 @@ public enum EngineLocator {
 
     /// The engine's environment: ours, without what marks a process as running inside a Claude
     /// Code session (the builder it starts would think it was nested), plus the usual install
-    /// folders on PATH, since an app opened from the Dock gets the system's short PATH.
+    /// folders on PATH, since an app opened from the Dock gets the system's short PATH. Homebrew's
+    /// rustup is keg-only: its `cargo` is in `opt/rustup/bin`, not `bin`, so builds of Rust stacks
+    /// found no cargo.
     public static func environment(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
         var env = base.filter { key, _ in key != "CLAUDECODE" && !key.hasPrefix("CLAUDE_CODE_") }
         let home = env["HOME"] ?? NSHomeDirectory()
-        let extra = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "\(home)/.cargo/bin"]
+        let extra = [
+            "\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "\(home)/.cargo/bin",
+            "/opt/homebrew/opt/rustup/bin", "/usr/local/opt/rustup/bin",
+        ]
         var path = (env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").split(separator: ":").map(String.init)
         for p in extra where !path.contains(p) { path.append(p) }
         env["PATH"] = path.joined(separator: ":")

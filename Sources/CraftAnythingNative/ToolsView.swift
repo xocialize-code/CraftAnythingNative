@@ -63,7 +63,7 @@ private struct ToolRunner: View {
     let tool: EngineTool
     @State private var values: [String: String] = [:]
     @State private var flags: [String: Bool] = [:]
-    @State private var running = false
+    @State private var running: Task<Void, Never>?
     @State private var result: ToolResult?
     @State private var problem: String?
 
@@ -84,8 +84,12 @@ private struct ToolRunner: View {
                     .frame(minHeight: CGFloat(tool.parameters.count) * 64 + 20)
                 }
                 HStack {
-                    Button(running ? "Running…" : "Run", action: run).keyboardShortcut(.return, modifiers: .command).disabled(running)
-                    if running { ProgressView().controlSize(.small) }
+                    if let running {
+                        Button("Stop") { running.cancel() }.keyboardShortcut(.cancelAction)
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Run", action: run).keyboardShortcut(.return, modifiers: .command)
+                    }
                     if let problem { Text(problem).foregroundStyle(.red) }
                     Spacer()
                     if tool.readOnly { Text("Read-only").font(.caption).foregroundStyle(.secondary) }
@@ -180,11 +184,13 @@ private struct ToolRunner: View {
     private func run() {
         problem = nil
         guard let args = arguments() else { return }
-        running = true
-        Task {
-            // Tools that run code wait for the person's approval in the app's inbox.
-            result = await engine.call(tool.name, args, timeout: .seconds(45 * 60))
-            running = false
+        result = nil
+        running = Task {
+            // Tools that run code wait for the person's approval in the app's inbox. Stop cancels
+            // the call, and the engine is told to cancel it too.
+            let r = await engine.call(tool.name, args, timeout: .seconds(45 * 60))
+            if Task.isCancelled { problem = "Stopped." } else { result = r }
+            running = nil
         }
     }
 }

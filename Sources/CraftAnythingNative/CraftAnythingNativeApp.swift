@@ -26,8 +26,24 @@ struct LaunchOptions {
     }
 }
 
+/// Quitting stops the engine first: a call it's still in (a check waiting for a build) would
+/// otherwise keep it running after the app is gone.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var engine: EngineModel?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let engine else { return .terminateNow }
+        Task { @MainActor in
+            await engine.stop()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+
 @main
 struct CraftAnythingNativeApp: App {
+    @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var engine: EngineModel
     private let options = LaunchOptions.parse(CommandLine.arguments)
 
@@ -54,6 +70,7 @@ struct CraftAnythingNativeApp: App {
                 .environment(engine)
                 .frame(minWidth: 900, minHeight: 600)
                 .task {
+                    delegate.engine = engine
                     await engine.start()
                     if let file = options.screenshot { await Screenshot.saveAndQuit(to: file, engine: engine) }
                 }
