@@ -72,6 +72,8 @@ final class ProjectModel {
     var name = ""
     var request = ""
     var stack = ""
+    /// The browser that pictured the original website, for people; empty until it's studied.
+    var browser = ""
     var statusLabel = ""
     var note = ""
     var running = false
@@ -82,6 +84,17 @@ final class ProjectModel {
     var lastError: String?
 
     init(folder: String) { self.folder = folder }
+
+    /// The engine records `built_in` (its own Chromium) or the id of the plugin that pictured the
+    /// site; this app's plugin is `mac_app` (craft-anything-native-tools --print-config).
+    static func browserName(_ recorded: String?) -> String {
+        switch recorded {
+        case nil: ""
+        case "built_in": "Chromium"
+        case "mac_app": "WebKit"
+        case let other?: other
+        }
+    }
 
     var screenshot: URL? {
         let pictures = checks.reversed().flatMap(\.artifacts).filter { $0.hasSuffix(".png") }
@@ -96,6 +109,7 @@ final class ProjectModel {
             name = r["name"]?.string ?? URL(fileURLWithPath: folder).lastPathComponent
             request = r["request"]?.string ?? ""
             stack = r["stack"]?.string ?? ""
+            browser = Self.browserName(r["browser"]?.string)
             checks = (r["checks"]?.array ?? []).compactMap(CheckResult.init(json:))
             questions = (r["questions"]?.array ?? []).compactMap(Self.request(from:))
             conversation = (r["conversation"]?["items"]?.array ?? []).enumerated().map { ConversationItem(id: $0.offset, json: $0.element) }

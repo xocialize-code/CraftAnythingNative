@@ -49,6 +49,10 @@ struct ProjectView: View {
                     Text(model.statusLabel.isEmpty ? "…" : model.statusLabel).font(.headline)
                     if let q = model.queued { Text("Queued (\(q))").foregroundStyle(.secondary) }
                     if !model.stack.isEmpty { Text(model.stack).font(.caption).padding(.horizontal, 6).padding(.vertical, 2).background(.quaternary, in: Capsule()) }
+                    if !model.browser.isEmpty {
+                        Label(model.browser, systemImage: "safari").font(.caption).padding(.horizontal, 6).padding(.vertical, 2).background(.quaternary, in: Capsule())
+                            .help("The browser that pictured the original. Its checks picture the build with the same one.")
+                    }
                 }
                 if !model.note.isEmpty { Text(model.note).foregroundStyle(.secondary).textSelection(.enabled) }
                 if let e = model.lastError { Text(e).foregroundStyle(.red).textSelection(.enabled) }
