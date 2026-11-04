@@ -139,7 +139,13 @@ private let nativeTools: URL? = {
             <p style="height:1500px">Tall</p><script>console.error('planted error')</script></main></body></html>
             """)
         defer { site.terminate() }
-        try await Task.sleep(for: .milliseconds(800))
+        // python3's first start on a fresh machine (a CI runner) can take seconds: wait until it answers.
+        var answered = false
+        for _ in 0..<60 where !answered {
+            answered = (try? await URLSession.shared.data(from: URL(string: url)!)) != nil
+            if !answered { try await Task.sleep(for: .milliseconds(250)) }
+        }
+        try #require(answered, "the test page's server never answered at \(url)")
         let client = MCPClient(executable: try #require(nativeTools), arguments: [])
         try await client.start()
         defer { Task { await client.stop() } }
@@ -153,7 +159,7 @@ private let nativeTools: URL? = {
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
         let opened = try await call("web_site_open", ["url": .string(url), "settle_ms": 300], meta: ["clean_room": false])
-        #expect(opened["structuredContent"]?["result"]?["title"] == "Live")
+        try #require(opened["structuredContent"]?["result"]?["title"] == "Live", "\(opened)")
         #expect(opened.at("/structuredContent/result/health/errors/0/text") == "planted error", "console errors are kept")
         let width = opened.at("/structuredContent/result/facts/width")?.int ?? 0
         #expect((1400..<1440).contains(width), "a page that scrolls keeps a scrollbar gutter, as in Chromium: \(width)")
