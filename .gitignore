@@ -2,3 +2,4 @@
 .swiftpm/
 /Engine/bin/
 .DS_Store
+/dist/

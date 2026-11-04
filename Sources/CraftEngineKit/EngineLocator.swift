@@ -37,9 +37,15 @@ public enum EngineLocator {
         return beside.flatMap { fm.isExecutableFile(atPath: $0.path) ? $0 : nil }
     }
 
-    /// What `Tools/engine/pin-engine.sh` recorded beside the engine (`commit`, `version`, `sha256`).
+    /// What `Tools/engine/pin-engine.sh` recorded beside the engine (`commit`, `version`, `sha256`). In a
+    /// release bundle the record is `Contents/Resources/engine-pin.txt`: only signed code may sit in
+    /// `Contents/MacOS`, beside the engine.
     public static func pin(of engine: URL) -> [String: String] {
-        let file = engine.deletingLastPathComponent().appendingPathComponent("pin.txt")
+        var file = engine.deletingLastPathComponent().appendingPathComponent("pin.txt")
+        if engine.resolvingSymlinksInPath() == Bundle.main.url(forAuxiliaryExecutable: programName)?.resolvingSymlinksInPath(),
+           let bundled = Bundle.main.url(forResource: "engine-pin", withExtension: "txt") {
+            file = bundled
+        }
         guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [:] }
         var out: [String: String] = [:]
         for line in text.split(separator: "\n") {

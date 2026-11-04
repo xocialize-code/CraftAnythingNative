@@ -1,0 +1,141 @@
+# Builds, checks, notarizes and publishes CraftAnythingNative when a v<version> tag is pushed (or, on demand, builds,
+# checks and notarizes any ref without publishing), with Tools/release.sh. The four signing and notary secrets are
+# organization secrets on xocialize-code, shared with Gaea (gaea's Docs/Signing secrets.md). ENGINE_DEPLOY_KEY is this
+# repository's own: a read-only deploy key of the private engine fork, xocialize/craft-anything.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or branch to build (default: the branch dispatched from)"
+        required: false
+      publish:
+        description: "Publish a GitHub Release for that version (otherwise build, check and notarize only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      # Fail loudly, before anything is built, when a secret is missing: a release that skipped notarization must never
+      # look green.
+      - name: Check the secrets are set
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+          ENGINE_DEPLOY_KEY: ${{ secrets.ENGINE_DEPLOY_KEY }}
+        run: |
+          missing=()
+          for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_APPLE_ID NOTARY_APP_PASSWORD ENGINE_DEPLOY_KEY; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Name the temporary keychain
+        run: echo "KEYCHAIN=$RUNNER_TEMP/cany-signing.keychain-db" >> "$GITHUB_ENV"
+
+      # The whole history and its tags, so the release notes can link the changes since the previous release.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+          path: CraftAnythingNative
+
+      - name: Read the engine pin
+        id: pin
+        run: |
+          . CraftAnythingNative/Tools/engine/pin.env
+          echo "commit=$CRAFT_ANYTHING_COMMIT" >> "$GITHUB_OUTPUT"
+
+      # Beside this repository, where Tools/engine/pin-engine.sh looks for it.
+      - uses: actions/checkout@v4
+        with:
+          repository: xocialize/craft-anything
+          ref: ${{ steps.pin.outputs.commit }}
+          ssh-key: ${{ secrets.ENGINE_DEPLOY_KEY }}
+          persist-credentials: false
+          path: craft-anything
+
+      - name: Select the newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcrun swift --version
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: craft-anything
+          key: ${{ steps.pin.outputs.commit }}
+
+      - name: Import the Developer ID certificate into a temporary keychain
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/developer-id.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Store the notary credentials in the same keychain
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials mlx-notary \
+            --apple-id "$NOTARY_APPLE_ID" --team-id CFZS6RXUCP --password "$NOTARY_APP_PASSWORD" \
+            --keychain "$KEYCHAIN"
+
+      - name: Build, check, notarize, release
+        working-directory: CraftAnythingNative
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARIZE: "yes"
+          PUBLISH: ${{ (github.event_name == 'push' || inputs.publish) && 'yes' || 'no' }}
+        run: NOTARY_KEYCHAIN="$KEYCHAIN" Tools/release.sh
+
+      - name: Keep the build's evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          if-no-files-found: ignore
+          path: |
+            CraftAnythingNative/dist/*.dmg
+            CraftAnythingNative/dist/*.sha256
+            CraftAnythingNative/dist/RELEASE.txt
+            CraftAnythingNative/dist/tests.log
+            CraftAnythingNative/dist/smoke*
+            CraftAnythingNative/dist/notary*.json
+
+      - name: Remove the temporary keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN" || true

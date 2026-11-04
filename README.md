@@ -20,6 +20,26 @@ projects.
 To capture a window without the person's data, run with `--screenshot <file.png> [--section new|tools|<project folder>]`.
 That draws the window into a PNG and quits. The engine's settings, projects and inbox go to a fresh temp folder.
 
+## Releases
+
+Pushing a `v<version>` tag that matches `VERSION` runs `.github/workflows/release.yml`, which runs
+`Tools/release.sh` and publishes the GitHub Release. The release script:
+- builds the pinned engine (from the private fork, through a read-only deploy key, `ENGINE_DEPLOY_KEY`)
+- runs `swift test`
+- bundles the app, the tool server, the WebKit plugin and the engine
+- signs everything with Developer ID
+- smoke-tests the bundle with the build folders hidden: the bundled engine serves the WebKit browser set through the
+  bundled plugin, and the app draws its window
+- notarizes and staples the app, then the DMG
+- publishes the DMG, its `.sha256` and `Docs/releases/<version>.md` as the notes
+
+The signing and notary secrets are organization secrets on xocialize-code, the same ones Gaea uses. Running the
+workflow by hand (Actions › release › Run workflow) builds, checks and notarizes any ref without publishing.
+
+The script runs the same way on this Mac: `Tools/release.sh` signs with the keychain's Developer ID, notarizes with
+the `mlx-notary` profile when it exists, and leaves everything in `dist/`. `PUBLISH=yes` also publishes. Its header
+lists the other settings, such as `SIGN_IDENTITY=-` for an ad hoc test build.
+
 ## What's here
 
 - **`CraftEngineKit`** is the engine connection:
