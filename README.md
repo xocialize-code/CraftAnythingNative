@@ -54,9 +54,11 @@ That draws the window into a PNG and quits. The engine's settings, projects and 
   replaces = ["web_site_open", "web_site_capture", "web_page_states_capture", "web_site_close"]
   ```
 
-  Every engine process reads it, so Study, the checks and the builders all picture websites with WebKit. The app
-  doesn't write it for you yet: a project studied with Chromium must be checked with Chromium, so the choice
-  belongs to each project (stage 2's next step). Each call is logged to
+  Every engine process reads it, so Study, the checks and the builders all picture websites with WebKit. Each
+  project keeps the browser that pictured its original (`browser` in its `craft.json`, set by Study; the project
+  screen shows it), and pictures of its build follow that record, so projects studied with Chromium stay on
+  Chromium after WebKit is turned on. A project pictured with a plugin that's since been removed is refused, not
+  switched; studying it again records the browser set up then. The app doesn't add the entry for you yet. Each call is logged to
   `~/Library/Logs/CraftAnythingNative/native-tools.log`. `Tools/parity/webkit-parity.py` captures the same pages
   both ways and reports the differences.
 - **`craft-anything-tool-server`** is the program builders get as their tool server. The app sets
@@ -91,7 +93,7 @@ website page scripts, under the engine's license, as its header says.
 
 Port the pieces that are better native, behind the same tool ids, as `NativeTool`s the engine sends to
 `craft-anything-native-tools`:
-- website capture (WKWebView): done; next, each project records the browser that studied it
+- website capture (WKWebView): done, and each project keeps the browser that studied it
 - window capture (ScreenCaptureKit)
 - driving Claude Code, and the inbox
 - project files, checked byte for byte against the pinned engine
