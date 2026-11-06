@@ -96,11 +96,11 @@ lists the other settings, such as `SIGN_IDENTITY=-` for an ad hoc test build.
 ## The engine pin
 
 `Tools/engine/pin.env` names the engine commit this shell drives: the `native` branch of our fork (kept
-private, at `xocialize/craft-anything`), based on upstream `8c3532d`. It adds the SwiftUI stack, the
-`CRAFT_ANYTHING_TOOL_SERVER` setting, plugins that `replace` built-in tools (with the call's `_meta`), and the
-website page scripts as files. We don't send changes upstream. Instead, we review what upstream adds
-since the base and cherry-pick what's worth having. After that, move the pin, run `pin-engine.sh` and run the
-tests again. `Engine/bin/pin.txt` records the binary's commit, version and sha256, and the toolbar shows that
+private, at `xocialize/craft-anything`), based on upstream `main` at `fc93bd0` (craft-anything 0.4.0). It adds
+the SwiftUI stack, the `CRAFT_ANYTHING_TOOL_SERVER` setting, plugins that `replace` built-in tools (with the
+call's `_meta`), the website page scripts as files, and each project's record of the browser that pictured it.
+We don't send changes upstream. To take upstream's changes, we rebase those commits onto upstream `main` and run
+the engine's checks. After that, move the pin, run `pin-engine.sh` and run the tests again. `Engine/bin/pin.txt` records the binary's commit, version and sha256, and the toolbar shows that
 commit.
 
 ## License
