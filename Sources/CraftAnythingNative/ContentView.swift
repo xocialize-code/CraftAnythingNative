@@ -35,6 +35,7 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .status) { EngineBadge() }
+            ToolbarItem(placement: .primaryAction) { ModeToolbarControl() }
         }
         .sheet(item: Binding(get: { engine.waiting.first }, set: { _ in })) { request in
             InboxRequestView(request: request) { answer in engine.answer(request, answer) }
@@ -115,7 +116,7 @@ private struct EngineBadge: View {
         case .failed: return "Engine stopped"
         case .ready:
             let commit = engine.pin["commit"].map { " · \($0.prefix(7))" } ?? ""
-            return "Engine \(engine.engineVersion)\(commit) · \(engine.cleanRoom ? "Clean room" : "Deep mode") · \(engine.tools.count) tools"
+            return "Engine \(engine.engineVersion)\(commit) · \(engine.tools.count) tools"
         }
     }
 }

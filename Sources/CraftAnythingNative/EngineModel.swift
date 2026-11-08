@@ -44,7 +44,21 @@ final class EngineModel {
     var engineVersion = ""
     var enginePath = ""
     var pin: [String: String] = [:]
+    /// Clean room (the default) or Deep mode, as the running engine has it.
     var cleanRoom = true
+    /// Clean room ↔ Deep is being switched.
+    var switchingMode = false
+    /// Ghidra's launcher when it's installed: Deep mode's decompiler for programs.
+    var ghidraPath: String?
+    /// Ghidra can be installed for the person on this Mac (`engines_install`).
+    var ghidraInstallable = false
+    var installingGhidra = false
+    /// What the engine last reported about the Ghidra download.
+    var ghidraProgress = ""
+    /// The asset budget a new game starts with (`assets.budget_usd`).
+    var assetBudget = 5.0
+    /// An asset provider's key is stored, so a game may generate pictures and 3D models.
+    var assetKeyStored = false
     var tools: [EngineTool] = []
     var projects: [ProjectSummary] = []
     var projectsDir = ""
@@ -58,6 +72,8 @@ final class EngineModel {
     let configDir: URL?
 
     private var client: MCPClient?
+    /// The progress token whose reports go to `ghidraProgress`.
+    private var progressWatch: String?
     private var watchers: [Task<Void, Never>] = []
 
     init(inboxDir: URL, configDir: URL? = nil) {
@@ -87,7 +103,7 @@ final class EngineModel {
             self.client = client
             watch(client)
             tools = try await client.listTools().sorted { $0.name < $1.name }
-            cleanRoom = (try? await client.callTool("core_session_show"))?.result?["clean_room"]?.bool ?? true
+            await refreshSettings()
             phase = .ready
             await refreshProjects()
         } catch {
@@ -112,6 +128,55 @@ final class EngineModel {
         } catch {
             return Self.failure(error.localizedDescription)
         }
+    }
+
+    /// Re-read the mode, Ghidra and the asset settings from the engine.
+    func refreshSettings() async {
+        async let session = call("core_session_show")
+        async let engines = call("engines_list")
+        async let settings = call("settings_show")
+        async let key = call("assets_key_status")
+        let (s, e, st, k) = await (session, engines, settings, key)
+        if let clean = s.result?["clean_room"]?.bool { cleanRoom = clean }
+        if let e = e.result {
+            ghidraPath = e["deep_mode"]?["ghidra"]?.string
+            ghidraInstallable = e["engines"]?.array?.first { $0["id"]?.string == "ghidra" }?["installable_here"]?.bool ?? false
+        }
+        if let budget = st.result?["settings"]?["assets"]?["budget_usd"]?.number { assetBudget = budget }
+        if let stored = k.result?["stored"]?.bool { assetKeyStored = stored }
+    }
+
+    /// Switch between Clean room and Deep mode; nil when it worked, else why not. The engine saves
+    /// it in its settings, so every engine process it starts (Study, checks, builders) follows. Its
+    /// tool list changes with the mode, and it doesn't announce that, so the tools are listed again.
+    func setDeepMode(_ on: Bool) async -> String? {
+        switchingMode = true
+        defer { switchingMode = false }
+        let r = await call("settings_set", ["key": "deep_mode", "value": .bool(on)])
+        if let failed = r.errorMessage { return failed }
+        await refreshSettings()
+        if let client, let listed = try? await client.listTools() { tools = listed.sorted { $0.name < $1.name } }
+        note(on ? "Deep mode on" : "Clean room on")
+        return nil
+    }
+
+    /// Download and install Ghidra into the engine's store; nil when it worked, else why not.
+    func installGhidra() async -> String? {
+        guard let client else { return "The engine isn't running." }
+        installingGhidra = true
+        ghidraProgress = ""
+        defer { installingGhidra = false }
+        let token = "ghidra-\(UUID().uuidString)"
+        progressWatch = token
+        defer { progressWatch = nil }
+        let r: ToolResult
+        do {
+            r = try await client.callTool("engines_install", ["engine": "ghidra"], timeout: .seconds(2 * 60 * 60), progressToken: token)
+        } catch {
+            return error.localizedDescription
+        }
+        await refreshSettings()
+        return r.errorMessage
     }
 
     func refreshProjects() async {
@@ -141,7 +206,13 @@ final class EngineModel {
                 guard let self else { return }
                 switch event {
                 case .notification(let method, let params):
-                    if method == "notifications/progress", let m = params["message"]?.string { self.note(m) }
+                    if method == "notifications/progress", let m = params["message"]?.string {
+                        if let watched = self.progressWatch, params["progressToken"]?.string == watched {
+                            self.ghidraProgress = m
+                        } else {
+                            self.note(m)
+                        }
+                    }
                     if method == "notifications/tools/list_changed", let tools = try? await client.listTools() {
                         self.tools = tools.sorted { $0.name < $1.name }
                     }

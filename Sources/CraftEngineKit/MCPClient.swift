@@ -108,9 +108,15 @@ public actor MCPClient {
     }
 
     /// Run a tool. A tool that fails comes back as a result with `isError`, not as a throw; throws
-    /// only when the call itself couldn't be made or answered in time.
-    public func callTool(_ name: String, _ arguments: JSONValue = [:], timeout: Duration = .seconds(120)) async throws -> ToolResult {
-        let reply = try await request("tools/call", ["name": .string(name), "arguments": arguments], timeout: timeout)
+    /// only when the call itself couldn't be made or answered in time. With a `progressToken`, the
+    /// engine reports the call's progress as `notifications/progress` carrying that token (it sends
+    /// none without one).
+    public func callTool(
+        _ name: String, _ arguments: JSONValue = [:], timeout: Duration = .seconds(120), progressToken: String? = nil
+    ) async throws -> ToolResult {
+        var params: [String: JSONValue] = ["name": .string(name), "arguments": arguments]
+        if let progressToken { params["_meta"] = ["progressToken": .string(progressToken)] }
+        let reply = try await request("tools/call", .object(params), timeout: timeout)
         return ToolResult(json: reply)
     }
 

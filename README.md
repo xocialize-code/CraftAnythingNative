@@ -92,6 +92,12 @@ lists the other settings, such as `SIGN_IDENTITY=-` for an ad hoc test build.
     send a note or a follow-up, stop the build, play the result, or show it in Finder.
   - A tool browser with a form for each tool, built from its schema.
   - A sheet for approvals posted to the app's inbox.
+  - Clean room or Deep: a switch in the toolbar, in Settings and in New Build. They all set the engine's saved
+    `deep_mode`, so every engine process it starts follows it. The engine lists 107 tools in Clean room and 321 in
+    Deep, and doesn't announce the change, so the app lists the tools again after switching. Turning Deep on asks
+    first. Settings shows whether Ghidra is installed and can get it (`engines_install`). When Clean room refuses
+    something (`details.reason = "clean_room"`), the Tools form and the project screen offer to turn on Deep mode.
+  - New Build's Game assets switch (`generate_assets`), for game stacks and the builder's choice.
 
 ## The engine pin
 

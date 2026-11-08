@@ -81,6 +81,10 @@ struct CraftAnythingNativeApp: App {
                 Button("Restart Engine") { Task { await engine.start() } }
             }
         }
+
+        Settings {
+            SettingsView().environment(engine)
+        }
     }
 }
 

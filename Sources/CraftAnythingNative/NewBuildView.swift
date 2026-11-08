@@ -2,6 +2,9 @@ import AppKit
 import CraftEngineKit
 import SwiftUI
 
+/// The stacks that make a game: a build with one of these may generate its pictures and 3D models.
+private let gameStacks: Set<String> = ["Godot", "Unity", "Unreal Engine", "Rust + macroquad"]
+
 /// The stacks a build can be asked for by name: the engine's stacks.toml names (it takes an engine
 /// or a stack's full name). Builder's choice sends none.
 private let stacks = [
@@ -26,6 +29,7 @@ struct NewBuildView: View {
     @State private var path = ""
     @State private var stack = ""
     @State private var rounds = 2
+    @State private var generateAssets = false
     @State private var starting = false
     @State private var error: String?
 
@@ -62,6 +66,14 @@ struct NewBuildView: View {
                     }
                 }
             }
+            Section {
+                ModeChoice()
+                if original == .file && !engine.cleanRoom { GhidraLine() }
+            } header: {
+                Text("How closely may Craft Anything look at it?")
+            } footer: {
+                Text("For everything you make, like the switch in the toolbar.").foregroundStyle(.secondary)
+            }
             Section("How") {
                 Picker("Build with", selection: $stack) {
                     Text("Builder's choice").tag("")
@@ -70,6 +82,15 @@ struct NewBuildView: View {
                 }
                 Stepper("Refinement rounds: \(rounds)", value: $rounds, in: 0...6)
                 LabeledContent("Saved in", value: engine.projectsDir.isEmpty ? "The engine's projects folder" : engine.projectsDir)
+            }
+            if mayBeGame {
+                Section {
+                    Toggle("Let the builder generate pictures and 3D models", isOn: $generateAssets)
+                } header: {
+                    Text("Game assets")
+                } footer: {
+                    Text(assetsFooter).foregroundStyle(.secondary)
+                }
             }
             Section {
                 HStack {
@@ -104,6 +125,17 @@ struct NewBuildView: View {
         }
     }
 
+    /// A game stack, or the builder's choice (which may turn out to be a game).
+    private var mayBeGame: Bool { stack.isEmpty || gameStacks.contains(stack) }
+
+    private var assetsFooter: String {
+        let budget = engine.assetBudget.formatted(.currency(code: "USD"))
+        if engine.assetKeyStored {
+            return "For a game: realistic textures, skies and models, paid from your fal.ai key within the game's \(budget) asset budget. Off, the builder uses simple shapes and colours."
+        }
+        return "No fal.ai key is set up yet (assets_key_set in Tools), so the builder will use simple shapes and colours even when this is on."
+    }
+
     private var canStart: Bool {
         !starting && target != nil && !request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -123,6 +155,7 @@ struct NewBuildView: View {
             "rounds": .number(Double(rounds)),
         ]
         if !stack.isEmpty { args["build_with"] = .string(stack) }
+        if mayBeGame && generateAssets { args["generate_assets"] = .bool(true) }
         starting = true
         error = nil
         Task {

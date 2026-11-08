@@ -56,6 +56,7 @@ struct ProjectView: View {
                 }
                 if !model.note.isEmpty { Text(model.note).foregroundStyle(.secondary).textSelection(.enabled) }
                 if let e = model.lastError { Text(e).foregroundStyle(.red).textSelection(.enabled) }
+                if model.refusedForCleanRoom && engine.cleanRoom { DeepModeNeeded() }
             }
             Spacer()
         }

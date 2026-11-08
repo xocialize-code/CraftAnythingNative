@@ -309,6 +309,63 @@ private struct EchoTool: NativeTool {
         await client.stop()
     }
 
+    /// Clean room refuses a look inside with a refusal the app can tell apart; `settings_set deep_mode`
+    /// switches the running engine at once, lists the tools that look inside, and saves it for the
+    /// engine processes it starts later. Switching back refuses again.
+    @Test(.enabled(if: engine != nil)) func deepModeSwitchesTheRunningEngine() async throws {
+        let engine = try #require(Self.engine)
+        let config = try tempDir()
+        var env = EngineLocator.environment()
+        env["CRAFT_ANYTHING_CONFIG_DIR"] = config.path
+        let client = MCPClient(executable: engine, arguments: ["mcp", "--all-tools", "--inbox", try tempDir().path], environment: env)
+        try await client.start()
+        _ = try await client.initialize(clientName: "tests", version: "0")
+        let cleanTools = try await client.listTools().count
+
+        let refused = try await client.callTool("core_target_open", ["path": "/usr/bin/true"])
+        #expect(refused.isCleanRoomRefusal, "\(refused.text)")
+        #expect(refused.errorCode == "feature_missing")
+        let missing = try await client.callTool("rebuild_status", ["project": .string(config.appendingPathComponent("nope").path)])
+        #expect(missing.isError && !missing.isCleanRoomRefusal, "other failures aren't refusals")
+
+        let set = try await client.callTool("settings_set", ["key": "deep_mode", "value": true])
+        #expect(!set.isError, "\(set.text)")
+        #expect(try await client.callTool("core_session_show").result?["clean_room"]?.bool == false)
+        #expect(try await client.listTools().count > cleanTools, "Deep mode lists the tools that look inside")
+        let engines = try await client.callTool("engines_list")
+        #expect(engines.result?["deep_mode"]?["enabled"]?.bool == true)
+        let saved = try String(contentsOf: config.appendingPathComponent("config.toml"), encoding: .utf8)
+        #expect(saved.contains("deep_mode = true"), "saved for the engine processes it starts")
+        let opened = try await client.callTool("core_target_open", ["path": "/usr/bin/true"])
+        #expect(!opened.isCleanRoomRefusal, "\(opened.text)")
+
+        _ = try await client.callTool("settings_set", ["key": "deep_mode", "value": false])
+        #expect(try await client.listTools().count == cleanTools)
+        #expect(try await client.callTool("core_target_triage").isCleanRoomRefusal)
+        await client.stop()
+    }
+
+    /// A call with a progress token gets the engine's progress reports for it.
+    @Test func callsCanAskForProgress() async throws {
+        let echo = try tempDir().appendingPathComponent("echo.py")
+        // A stand-in server: answers each request with the `_meta` it was sent.
+        try """
+            import json, sys
+            for line in sys.stdin:
+                m = json.loads(line)
+                if "id" in m:
+                    meta = m.get("params", {}).get("_meta", {})
+                    print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"content": [{"type": "text", "text": json.dumps({"result": meta})}]}}), flush=True)
+            """.write(to: echo, atomically: true, encoding: .utf8)
+        let client = MCPClient(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-I", echo.path], environment: EngineLocator.environment())
+        try await client.start()
+        let with = try await client.callTool("x", progressToken: "t-1")
+        #expect(with.result?["progressToken"]?.string == "t-1")
+        let without = try await client.callTool("x")
+        #expect(without.result?["progressToken"] == nil)
+        await client.stop()
+    }
+
     /// A call that needs consent asks through the inbox and waits; a denial refuses it and nothing
     /// starts. (Allowing would start a real build, so only the refusal is tested here.)
     @Test(.enabled(if: engine != nil)) func consentIsAskedThroughTheInbox() async throws {

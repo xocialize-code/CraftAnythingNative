@@ -21,8 +21,14 @@ struct ToolsView: View {
                 if let tool = engine.tools.first(where: { $0.name == selected }) {
                     ToolRunner(tool: tool).id(tool.name)
                 } else {
-                    ContentUnavailableView("Pick a tool", systemImage: "wrench.and.screwdriver",
-                        description: Text("\(engine.tools.count) tools in \(engine.cleanRoom ? "Clean room" : "Deep mode"). Each is also a CLI command and an MCP tool."))
+                    ContentUnavailableView {
+                        Label("Pick a tool", systemImage: "wrench.and.screwdriver")
+                    } description: {
+                        Text("\(engine.tools.count) tools in \(engine.cleanRoom ? "Clean room" : "Deep mode"). Each is also a CLI command and an MCP tool."
+                            + (engine.cleanRoom ? " Deep mode adds the tools that look inside an original." : ""))
+                    } actions: {
+                        if engine.cleanRoom { DeepModeNeeded(explain: false) }
+                    }
                 }
             }
             .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
@@ -98,6 +104,9 @@ private struct ToolRunner: View {
                     GroupBox(result.isError ? "Failed" : "Result") {
                         VStack(alignment: .leading, spacing: 8) {
                             if let message = result.errorMessage { Text(message).foregroundStyle(.red).textSelection(.enabled) }
+                            if result.isCleanRoomRefusal {
+                                if engine.cleanRoom { DeepModeNeeded() } else { Text("Deep mode is on now: run it again.").foregroundStyle(.secondary) }
+                            }
                             Text(result.json.pretty())
                                 .font(.caption.monospaced())
                                 .textSelection(.enabled)

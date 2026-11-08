@@ -82,6 +82,11 @@ final class ProjectModel {
     var questions: [InboxRequest] = []
     var conversation: [ConversationItem] = []
     var lastError: String?
+    /// The last error was Clean room refusing something Deep mode would do.
+    var refusedForCleanRoom = false
+    /// The last error came from reading the project, not from something the person did, so the
+    /// next good read clears it. An action's error stays until the next action.
+    private var errorFromRefresh = false
 
     init(folder: String) { self.folder = folder }
 
@@ -113,9 +118,10 @@ final class ProjectModel {
             checks = (r["checks"]?.array ?? []).compactMap(CheckResult.init(json:))
             questions = (r["questions"]?.array ?? []).compactMap(Self.request(from:))
             conversation = (r["conversation"]?["items"]?.array ?? []).enumerated().map { ConversationItem(id: $0.offset, json: $0.element) }
-            lastError = nil
+            if errorFromRefresh { failed(nil) }
         } else {
-            lastError = s.errorMessage
+            failed(s)
+            errorFromRefresh = true
         }
         if let r = st.result {
             let label = r["status_label"]?.string ?? ""
@@ -144,7 +150,7 @@ final class ProjectModel {
         if let t = a.text, !t.isEmpty { args["text"] = .string(t) }
         if let allow = a.allow { args["allow"] = .bool(allow) }
         let r = await engine.call("project_inbox_answer", .object(args))
-        lastError = r.errorMessage
+        failed(r)
         await refresh(engine)
     }
 
@@ -157,17 +163,24 @@ final class ProjectModel {
             // Starting a build needs the person's approval, which waits in the app's inbox.
             r = await engine.call("rebuild_start", ["project": .string(folder), "request": .string(text)], timeout: .seconds(45 * 60))
         }
-        lastError = r.errorMessage
+        failed(r)
         await refresh(engine)
     }
 
     func stop(engine: EngineModel) async {
-        lastError = await engine.call("rebuild_stop", ["project": .string(folder)]).errorMessage
+        failed(await engine.call("rebuild_stop", ["project": .string(folder)]))
         await refresh(engine)
     }
 
     func play(engine: EngineModel) async {
-        lastError = await engine.call("project_play", ["project": .string(folder)], timeout: .seconds(45 * 60)).errorMessage
+        failed(await engine.call("project_play", ["project": .string(folder)], timeout: .seconds(45 * 60)))
+    }
+
+    /// Keep what a call said when it failed, and whether Clean room was the reason.
+    private func failed(_ r: ToolResult?) {
+        lastError = r?.errorMessage
+        refusedForCleanRoom = r?.isCleanRoomRefusal ?? false
+        errorFromRefresh = false
     }
 
     private static func request(from json: JSONValue) -> InboxRequest? {

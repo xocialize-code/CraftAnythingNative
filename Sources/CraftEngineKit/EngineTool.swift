@@ -94,4 +94,10 @@ public struct ToolResult: Sendable, Hashable {
 
     /// The engine's error code (`not_found`, `consent_required`, …).
     public var errorCode: String? { isError ? json["error"]?["code"]?.string : nil }
+
+    /// What the engine says about the failure beyond its message.
+    public var errorDetails: JSONValue? { isError ? json["error"]?["details"] : nil }
+
+    /// Clean room refused the tool because it looks inside the original; Deep mode would run it.
+    public var isCleanRoomRefusal: Bool { errorDetails?["reason"]?.string == "clean_room" }
 }
