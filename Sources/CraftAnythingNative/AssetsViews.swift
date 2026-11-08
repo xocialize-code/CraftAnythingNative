@@ -22,6 +22,8 @@ struct GameAssetsSettings: View {
             Picker("Pictures", selection: setting(\.imageModel, "image_model")) {
                 ForEach(pictureModels, id: \.id) { Text($0.label).tag($0.id) }
             }
+            // A grouped form's row label doesn't reach accessibility on its own.
+            .accessibilityLabel("Pictures")
             if engine.imageModel == "gaea" { gaea }
         } header: {
             Text("Game assets")
@@ -73,6 +75,7 @@ struct GameAssetsSettings: View {
                     Text("\(engine.gaeaModel) (not offered now)").tag(engine.gaeaModel)
                 }
             }
+            .accessibilityLabel("Gaea's model")
             Label(models.isEmpty ? "Gaea is running but offers no picture model. Add one with `gaea plugins add`." : "Gaea is running, with \(models.count) picture \(models.count == 1 ? "model" : "models").",
                 systemImage: models.isEmpty ? "exclamationmark.triangle" : "checkmark.circle")
                 .foregroundStyle(.secondary)
