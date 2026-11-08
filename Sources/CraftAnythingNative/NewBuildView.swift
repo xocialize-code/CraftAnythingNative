@@ -130,10 +130,18 @@ struct NewBuildView: View {
 
     private var assetsFooter: String {
         let budget = engine.assetBudget.formatted(.currency(code: "USD"))
-        if engine.assetKeyStored {
-            return "For a game: realistic textures, skies and models, paid from your fal.ai key within the game's \(budget) asset budget. Off, the builder uses simple shapes and colours."
+        let pictures: String
+        if engine.imageModel == "gaea" {
+            pictures = engine.gaeaModels == nil
+                ? "Pictures come from Gaea on this Mac, free, but Gaea isn't answering: start it before the build, or the builder uses simple shapes."
+                : "Pictures come from Gaea on this Mac, free."
+        } else {
+            pictures = engine.assetKeyStored ? "Pictures come from fal.ai, paid with your key." : "Pictures come from fal.ai, which needs a key (Settings › Game assets)."
         }
-        return "No fal.ai key is set up yet (assets_key_set in Tools), so the builder will use simple shapes and colours even when this is on."
+        let models = engine.assetKeyStored
+            ? "3D models come from fal.ai with your key, within the game's \(budget) asset budget."
+            : "3D models need a fal.ai key (Settings › Game assets); without one, the builder uses simple shapes."
+        return "\(pictures) \(models) Off, the builder uses simple shapes and colours."
     }
 
     private var canStart: Bool {

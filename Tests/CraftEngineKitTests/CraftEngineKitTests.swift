@@ -393,3 +393,155 @@ private struct EchoTool: NativeTool {
         await client.stop()
     }
 }
+
+/// Gaea, the media server on this Mac: what the app reads from it, and the engine making a game's
+/// picture through it (against a stand-in MES server, so it runs anywhere).
+@Suite struct GaeaTests {
+    @Test func picturesModelsComeFromTheGenerateDescriptor() {
+        let ops: JSONValue = [
+            "operations": [
+                ["operation": "image.fill", "models": [["id": "lama", "title": "LaMa"]]],
+                ["operation": "image.generate", "models": [
+                    ["id": "sensenova-u1", "title": "SenseNova U1", "named_only": true, "license": ["spdx": "Apache-2.0"]],
+                    ["id": "z-image-turbo", "title": "Z-Image Turbo", "default": true, "license": ["spdx": "Apache-2.0"]],
+                    ["title": "no id"],
+                ]],
+            ],
+        ]
+        let models = Gaea.pictureModels(fromOperations: ops)
+        #expect(models.map(\.id) == ["z-image-turbo", "sensenova-u1"], "the default first; only image.generate")
+        #expect(models[0].isDefault && models[1].namedOnly && models[1].licence == "Apache-2.0")
+        #expect(Gaea.pictureModels(fromOperations: [:]).isEmpty)
+    }
+
+    @Test func nothingAnsweringIsNil() async throws {
+        // A port that was just free.
+        let port = try freePort()
+        #expect(await Gaea.pictureModels(at: "http://127.0.0.1:\(port)/mes/v0", timeout: 2) == nil)
+    }
+
+    /// The pinned engine, with `assets.gaea_url` pointed at a stand-in, makes a game's picture
+    /// through Gaea: free, keyless, saved in the game, credited to the model Gaea names.
+    @Test(.enabled(if: PinnedEngineTests.engine != nil)) func theEngineMakesAGamesPictureThroughGaea() async throws {
+        let engine = try #require(PinnedEngineTests.engine)
+        let work = try tempDir()
+        let server = try MESStandIn(in: work)
+        defer { server.stop() }
+        // A game whose person allows generated assets.
+        let game = work.appendingPathComponent("game")
+        try FileManager.default.createDirectory(at: game.appendingPathComponent("inbox"), withIntermediateDirectories: true)
+        try #"{"version":2,"name":"Gaea check","request":"A snake game","target":{"kind":"none"},"created_ms":0,"updated_ms":0,"stack":"Godot","generate_assets":true}"#
+            .write(to: game.appendingPathComponent("craft.json"), atomically: true, encoding: .utf8)
+        let config = work.appendingPathComponent("config")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        var env = EngineLocator.environment()
+        env["CRAFT_ANYTHING_CONFIG_DIR"] = config.path
+        env["FAL_KEY"] = nil
+        let client = MCPClient(executable: engine, arguments: ["mcp", "--inbox", game.appendingPathComponent("inbox").path], environment: env)
+        try await client.start()
+        _ = try await client.initialize(clientName: "tests", version: "0")
+        let set = try await client.callTool("settings_set", ["key": "assets.gaea_url", "value": .string(server.base)])
+        #expect(!set.isError, "\(set.text)")
+        let keys = try await client.callTool("assets_key_status")
+        let gaea = keys.result?["providers"]?.array?.first { $0["provider"]?.string == "gaea" }
+        #expect(gaea?["needs_key"]?.bool == false)
+
+        let r = try await client.callTool("assets_image_generate", ["prompt": "a mossy stone texture", "save_as": "assets/generated/stone.png", "shape": "wide"], timeout: .seconds(60))
+        #expect(!r.isError, "\(r.text)")
+        #expect(r.result?["saved"]?.string == "assets/generated/stone.png")
+        #expect(r.result?["cost_usd"]?.number == 0)
+        #expect(r.result?["made_with"]?.string == "Stand-in Picture through Gaea (Apache-2.0)")
+        let saved = try Data(contentsOf: game.appendingPathComponent("app/assets/generated/stone.png"))
+        #expect(saved == MESStandIn.png)
+        let job = server.jobRequest ?? [:]
+        #expect(job["operation"]?.string == "image.generate" && job["params"]?["size"]?["width"]?.int == 1024 && job["params"]?["size"]?["height"]?.int == 576)
+        #expect(job["model"] == nil, "Gaea chooses")
+        #expect(server.confirmed, "collected, then confirmed")
+
+        // A model named in the settings is asked for.
+        _ = try await client.callTool("settings_set", ["key": "assets.gaea_model", "value": "flux2-klein"])
+        _ = try await client.callTool("assets_image_generate", ["prompt": "a sky", "save_as": "assets/generated/sky.png"], timeout: .seconds(60))
+        #expect(server.jobRequest?["model"]?.string == "flux2-klein")
+        _ = try await client.callTool("settings_set", ["key": "assets.gaea_model", "value": .null])
+        let show = try await client.callTool("settings_show")
+        #expect(show.result?["settings"]?["assets"]?["gaea_model"] == .null)
+        await client.stop()
+    }
+}
+
+private func freePort() throws -> Int {
+    let s = socket(AF_INET, SOCK_STREAM, 0)
+    defer { close(s) }
+    var addr = sockaddr_in()
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+    addr.sin_port = 0
+    var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+    _ = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(s, $0, len) } }
+    _ = withUnsafeMutablePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(s, $0, &len) } }
+    return Int(UInt16(bigEndian: addr.sin_port))
+}
+
+/// A stand-in for Gaea's MES front end: one image.generate job, held at once, its output a few
+/// bytes, and its confirmation. It writes what it was sent to files the test reads back.
+private final class MESStandIn: Sendable {
+    static let png = Data("\u{89}PNG stand-in".utf8)
+    let base: String
+    private let process: Process
+    private let dir: URL
+
+    init(in work: URL) throws {
+        dir = work.appendingPathComponent("mes")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Self.png.write(to: dir.appendingPathComponent("out.png"))
+        let script = dir.appendingPathComponent("mes.py")
+        try """
+            import json, os, sys
+            from http.server import BaseHTTPRequestHandler, HTTPServer
+            d = sys.argv[1]
+            class H(BaseHTTPRequestHandler):
+                def log_message(self, *a): pass
+                def send(self, status, body, kind="application/json"):
+                    self.send_response(status); self.send_header("Content-Type", kind)
+                    self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+                def do_POST(self):
+                    body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                    if self.path == "/mes/v0/jobs":
+                        open(os.path.join(d, "job.json"), "wb").write(body)
+                        job = {"id": "j1", "state": "holding", "outcome": "succeeded", "result": {
+                            "outputs": [{"index": 0, "name": "images", "kind": "image", "media_type": "image/png", "href": "/mes/v0/jobs/j1/outputs/0"}],
+                            "provenance": {"model": {"id": "stand-in", "title": "Stand-in Picture", "license": {"spdx": "Apache-2.0", "commercial_use": True}}}}}
+                        self.send(201, json.dumps(job).encode())
+                    elif self.path == "/mes/v0/jobs/j1/confirm":
+                        open(os.path.join(d, "confirmed"), "w").write("yes")
+                        self.send(200, json.dumps({"id": "j1", "state": "purged", "outcome": "succeeded"}).encode())
+                    else:
+                        self.send(404, b'{"error": {"code": "not_found", "message": "no"}}')
+                def do_GET(self):
+                    if self.path == "/mes/v0/jobs/j1/outputs/0":
+                        self.send(200, open(os.path.join(d, "out.png"), "rb").read(), "image/png")
+                    else:
+                        self.send(404, b'{"error": {"code": "not_found", "message": "no"}}')
+            s = HTTPServer(("127.0.0.1", 0), H)
+            print(s.server_address[1], flush=True)
+            s.serve_forever()
+            """.write(to: script, atomically: true, encoding: .utf8)
+        let out = Pipe()
+        process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-I", script.path, dir.path]
+        process.standardOutput = out
+        try process.run()
+        let line = String(decoding: out.fileHandleForReading.availableData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let port = Int(line) else { throw CocoaError(.fileReadCorruptFile) }
+        base = "http://127.0.0.1:\(port)/mes/v0"
+    }
+
+    var jobRequest: JSONValue? {
+        (try? String(contentsOf: dir.appendingPathComponent("job.json"), encoding: .utf8)).flatMap(JSONValue.parse)
+    }
+
+    var confirmed: Bool { FileManager.default.fileExists(atPath: dir.appendingPathComponent("confirmed").path) }
+
+    func stop() { process.terminate() }
+}

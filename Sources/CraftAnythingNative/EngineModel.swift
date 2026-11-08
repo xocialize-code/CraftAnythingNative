@@ -57,8 +57,18 @@ final class EngineModel {
     var ghidraProgress = ""
     /// The asset budget a new game starts with (`assets.budget_usd`).
     var assetBudget = 5.0
-    /// An asset provider's key is stored, so a game may generate pictures and 3D models.
+    /// A fal.ai key is stored: paid pictures, and 3D models.
     var assetKeyStored = false
+    /// The picture model, by its id in the engine's asset table (`assets.image_model`): "gaea" (the
+    /// default) or one of fal.ai's.
+    var imageModel = "gaea"
+    /// Where Gaea serves MES (`assets.gaea_url`); empty is this Mac's default.
+    var gaeaURL = ""
+    /// The model Gaea is asked for (`assets.gaea_model`); empty lets Gaea choose.
+    var gaeaModel = ""
+    /// What Gaea offers for pictures; nil when it isn't answering (or hasn't been asked yet).
+    var gaeaModels: [GaeaPictureModel]?
+    var gaeaChecked = false
     var tools: [EngineTool] = []
     var projects: [ProjectSummary] = []
     var projectsDir = ""
@@ -106,6 +116,7 @@ final class EngineModel {
             await refreshSettings()
             phase = .ready
             await refreshProjects()
+            await refreshGaea()
         } catch {
             await client.stop()
             self.client = nil
@@ -142,8 +153,41 @@ final class EngineModel {
             ghidraPath = e["deep_mode"]?["ghidra"]?.string
             ghidraInstallable = e["engines"]?.array?.first { $0["id"]?.string == "ghidra" }?["installable_here"]?.bool ?? false
         }
-        if let budget = st.result?["settings"]?["assets"]?["budget_usd"]?.number { assetBudget = budget }
-        if let stored = k.result?["stored"]?.bool { assetKeyStored = stored }
+        if let assets = st.result?["settings"]?["assets"] {
+            if let budget = assets["budget_usd"]?.number { assetBudget = budget }
+            imageModel = assets["image_model"]?.string ?? "gaea"
+            gaeaURL = assets["gaea_url"]?.string ?? ""
+            gaeaModel = assets["gaea_model"]?.string ?? ""
+        }
+        let fal = k.result?["providers"]?.array?.first { $0["provider"]?.string == "fal" }
+        if let stored = (fal ?? k.result)?["stored"]?.bool { assetKeyStored = stored }
+    }
+
+    /// Ask Gaea what picture models it offers right now.
+    func refreshGaea() async {
+        gaeaModels = await Gaea.pictureModels(at: gaeaURL.isEmpty ? Gaea.defaultBase : gaeaURL)
+        gaeaChecked = true
+    }
+
+    /// Set one of the engine's asset settings (`assets.<key>`); nil when it worked, else why not.
+    /// An empty string clears it back to the default.
+    func setAssetSetting(_ key: String, _ value: String) async -> String? {
+        let v: JSONValue = value.isEmpty ? .null : .string(value)
+        let r = await call("settings_set", ["key": .string("assets.\(key)"), "value": v])
+        await refreshSettings()
+        return r.errorMessage
+    }
+
+    /// Store or remove the fal.ai key (in the keychain, by the engine); nil when it worked.
+    func setFalKey(_ key: String?) async -> String? {
+        let r: ToolResult
+        if let key {
+            r = await call("assets_key_set", ["provider": "fal", "api_key": .string(key)])
+        } else {
+            r = await call("assets_key_remove", ["provider": "fal"])
+        }
+        await refreshSettings()
+        return r.errorMessage
     }
 
     /// Switch between Clean room and Deep mode; nil when it worked, else why not. The engine saves

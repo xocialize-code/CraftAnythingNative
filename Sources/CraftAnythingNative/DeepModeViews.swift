@@ -171,10 +171,15 @@ struct SettingsView: View {
             Section("Ghidra") {
                 GhidraLine()
             }
+            GameAssetsSettings()
         }
         .formStyle(.grouped)
-        .frame(width: 520)
+        .frame(width: 560)
         .disabled(engine.phase != .ready)
-        .task { if engine.phase == .ready { await engine.refreshSettings() } }
+        .task {
+            guard engine.phase == .ready else { return }
+            await engine.refreshSettings()
+            await engine.refreshGaea()
+        }
     }
 }

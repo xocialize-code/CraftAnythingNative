@@ -98,13 +98,26 @@ lists the other settings, such as `SIGN_IDENTITY=-` for an ad hoc test build.
     first. Settings shows whether Ghidra is installed and can get it (`engines_install`). When Clean room refuses
     something (`details.reason = "clean_room"`), the Tools form and the project screen offer to turn on Deep mode.
   - New Build's Game assets switch (`generate_assets`), for game stacks and the builder's choice.
+  - Settings › Game assets: who makes a game's pictures and which model. The choices are Gaea on this Mac (free and
+    keyless, the default) or one of fal.ai's models. Settings also shows whether Gaea is answering, lists the picture
+    models it offers (MES `GET /operations`), and holds the fal.ai key that 3D models still need.
+    `Tools/gaea/picture-check.py` makes one picture through the pinned engine and a running Gaea, the way a builder
+    does, in a throwaway project.
 
 ## The engine pin
 
 `Tools/engine/pin.env` names the engine commit this shell drives: the `native` branch of our fork (kept
-private, at `xocialize/craft-anything`), based on upstream `main` at `fc93bd0` (craft-anything 0.4.0). It adds
-the SwiftUI stack, the `CRAFT_ANYTHING_TOOL_SERVER` setting, plugins that `replace` built-in tools (with the
-call's `_meta`), the website page scripts as files, and each project's record of the browser that pictured it.
+private, at `xocialize/craft-anything`), based on upstream `main` at `fc93bd0` (craft-anything 0.4.0). It adds:
+- the SwiftUI stack
+- the `CRAFT_ANYTHING_TOOL_SERVER` setting
+- plugins that `replace` built-in tools (with the call's `_meta`)
+- the website page scripts as files
+- each project's record of the browser that pictured it
+- Gaea as a keyless asset provider
+  - It's the default for game pictures, sent over MES on loopback. `[assets] gaea_url` and `gaea_model` change the
+    address and the model.
+  - 3D models stay on fal.ai.
+
 We don't send changes upstream. To take upstream's changes, we rebase those commits onto upstream `main` and run
 the engine's checks. After that, move the pin, run `pin-engine.sh` and run the tests again. `Engine/bin/pin.txt` records the binary's commit, version and sha256, and the toolbar shows that
 commit.

@@ -147,7 +147,12 @@ Pro. No receipt for this exists yet.
 There's no rush, so this can run in any order.
 
 1. **A1–A3:** the switch, New Build, Ghidra status, refusals that offer Deep, and the assets switch. In progress.
-2. **B1 and B3:** prove one game build end to end with pictures from Gaea, then move the engine pin.
+2. **B1 and B3:** done 2026-11-08.
+   - The fork's `9d2c359` adds the Gaea provider, and the pin has moved to it.
+   - Settings › Game assets is in the app.
+   - The engine made a picture through a stand-in MES server, which `GaeaTests` checks.
+   - Still to do: one picture from a real Gaea (`Tools/gaea/picture-check.py`). It needs a Gaea with a picture plugin;
+     this Mac has Gaea 0.15.0 and no plugins.
 3. **A4:** the inspector first, then Ask (Claude Code driven from Swift).
 4. **Release 0.3.0**, with notes. The fork carries one more commit, recorded in the README's pin section.
 
