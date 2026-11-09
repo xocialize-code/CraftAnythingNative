@@ -48,6 +48,7 @@ def main() -> int:
         p = subprocess.Popen([str(ENGINE), "mcp", "--inbox", str(game / "inbox")], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, text=True)
         n = 0
+        started = time.monotonic()
 
         def rpc(method, params=None):
             nonlocal n
@@ -61,9 +62,12 @@ def main() -> int:
                 m = json.loads(line)
                 if m.get("id") == n:
                     return m
+                if m.get("method") == "notifications/progress":
+                    print(f"  {time.monotonic() - started:6.1f}s {m['params'].get('message', '')}", flush=True)
 
         def call(name, args):
-            r = rpc("tools/call", {"name": name, "arguments": args})["result"]
+            # A progress token: the engine says how the picture is going while Gaea makes it.
+            r = rpc("tools/call", {"name": name, "arguments": args, "_meta": {"progressToken": "check"}})["result"]
             return r.get("isError", False), json.loads(r["content"][0]["text"])
 
         try:
